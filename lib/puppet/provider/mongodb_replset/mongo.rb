@@ -96,11 +96,11 @@ Puppet::Type.type(:mongodb_replset).provide(:mongo, parent: Puppet::Provider::Mo
   end
 
   def rs_reconfig_member(host_conf, master)
-    mongo_command("rsReconfigMember(#{host_conf.to_json})", master)
+    mongo_command("rs.reconfig(#{host_conf.to_json})", master)
   end
 
   def rs_reconfig_settings(settings, master)
-    mongo_command("rsReconfigSettings(#{settings.to_json})", master)
+    mongo_command("rs.reconfig(#{settings.to_json})", master)
   end
 
   def rs_arbiter
@@ -342,12 +342,28 @@ Puppet::Type.type(:mongodb_replset).provide(:mongo, parent: Puppet::Provider::Mo
 
       Puppet.debug "Members to be Updated: #{update_members.inspect}" unless update_members.empty?
       update_members.each do |member|
+        # diff member
+        id = 0
+        settings = rs_config(master)
+        settings['members'].each do |m|
+          if m['host'] ===  member['host']
+            break
+          end
+          id += 1
+        end
+        if settings['members'][id]['arbiterOnly'] != member['arbiterOnly']
+          Puppet.info "Arbiter required: remove and apply member #{settings['members'][id]['host']}"
+          rs_remove(member, master)
+        end
+        settings['members'][id].merge!(member)
+        settings.delete('settings')
+
         retry_limit = 10
         retry_sleep = 3
 
         output = {}
         retry_limit.times do |n|
-          output = rs_reconfig_member(member, master)
+          output = rs_reconfig_member(settings, master)
           if !output['ok'].zero?
             Puppet.debug 'Host successfully updated in replicaset'
             break
