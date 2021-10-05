@@ -175,12 +175,12 @@ class Puppet::Provider::Mongodb < Puppet::Provider
     self.class.mongo_26?
   end
 
-  def self.mongo_4?
+  def self.mongo_greater_than_or_equal_4?
     v = mongo_version
-    !v[%r{^4\.}].nil?
+    !v[%r{^([4-9][0-9]?|[0-9]{2,3})\.}].nil?
   end
 
-  def mongo_4?
-    self.class.mongo_4?
+  def mongo_greater_than_or_equal_4?
+    self.class.mongo_greater_than_or_equal_4?
   end
 end

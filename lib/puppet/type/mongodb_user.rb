@@ -1,5 +1,7 @@
 require File.expand_path(File.join(File.dirname(__FILE__), '..', 'util', 'mongodb_md5er'))
 require File.expand_path(File.join(File.dirname(__FILE__), '..', 'util', 'mongodb_scram'))
+require File.expand_path(File.join(File.dirname(__FILE__), '..', 'util', 'mongodb_scram256'))
+
 Puppet::Type.newtype(:mongodb_user) do
   @doc = 'Manage a MongoDB user. This includes management of users password as well as privileges.'
 
@@ -64,10 +66,15 @@ Puppet::Type.newtype(:mongodb_user) do
     def insync?(is)
       # check if computed keys from password_hash, salt and iterations
       # match the keys of the existing user
-      if is == :absent && @resource.provider.scram_credentials
-        scram = @resource.provider.scram_credentials
-        scram_util = Puppet::Util::MongodbScram.new(should, scram['salt'], scram['iterationCount'])
-        if scram['storedKey'] == scram_util.stored_key && scram['serverKey'] == scram_util.server_key
+      if is == :absent && (@resource.provider.scram_credentials or @resource.provider.scram_256_credentials)
+
+        scram          = @resource.provider.scram_credentials
+        scram_256      = @resource.provider.scram_256_credentials
+        scram_util     = Puppet::Util::MongodbScram.new(should, scram['salt'], scram['iterationCount'])
+        scram_256_util = Puppet::Util::MongodbScram256.new(should, scram_256['salt'], scram_256['iterationCount'])
+
+        if (scram['storedKey'] == scram_util.stored_key && scram['serverKey'] == scram_util.server_key) or
+           (scram_256['storedKey'] == scram_256_util.stored_key && scram_256['serverKey'] == scram_256_util.server_key)
           is = should
         end
       end
@@ -89,13 +96,29 @@ Puppet::Type.newtype(:mongodb_user) do
       @resource.provider.password_hash
     end
 
-    def insync?(_is)
-      should_to_s == to_s?
+    def insync?(is)
+      if is == :absent && @resource.provider.scram_credentials
+
+        scram          = @resource.provider.scram_credentials
+        scram_256      = @resource.provider.scram_256_credentials
+        scram_util     = Puppet::Util::MongodbScram.new(should_to_s, scram['salt'], scram['iterationCount'])
+        scram_256_util = Puppet::Util::MongodbScram256.new(should_to_s, scram_256['salt'], scram_256['iterationCount'])
+
+        if (scram['storedKey'] == scram_util.stored_key && scram['serverKey'] == scram_util.server_key) or
+           (scram_256['storedKey'] == scram_256_util.stored_key && scram_256['serverKey'] == scram_256_util.server_key)
+          is = should_to_s
+        end
+      end
+      should_to_s == is
     end
   end
 
   newproperty(:scram_credentials) do
     desc 'The SCRAM-SHA-1 credentials of a user. These are read only and change when password or password_hash changes.'
+  end
+
+  newproperty(:scram_256_credentials) do
+    desc 'The SCRAM-SHA-256 credentials of a user. These are read only and change when password or password_hash changes.'
   end
 
   autorequire(:package) do
@@ -116,8 +139,8 @@ Puppet::Type.newtype(:mongodb_user) do
     elsif !self[:password_hash].nil? && !self[:password].nil?
       err("Only one of 'password_hash' or 'password' should be provided")
     end
-    if should(:scram_credentials)
-      raise("The parameter 'scram_credentials' is read-only and cannot be changed")
+    if should(:scram_credentials) or should(:scram_256_credentials)
+      raise("The parameters 'scram_credentials' and 'scram_256_credentials' is read-only and cannot be changed")
     end
   end
 end

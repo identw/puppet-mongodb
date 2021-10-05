@@ -17,7 +17,6 @@ Puppet::Type.type(:mongodb_user).provide(:mongodb, parent: Puppet::Provider::Mon
       return [] if auth_enabled && out.include?('not authorized on admin')
 
       users = JSON.parse out
-
       users.map do |user|
         new(name: user['_id'],
             ensure: :present,
@@ -25,7 +24,8 @@ Puppet::Type.type(:mongodb_user).provide(:mongodb, parent: Puppet::Provider::Mon
             database: user['db'],
             roles: from_roles(user['roles'], user['db']),
             password_hash: user['credentials']['MONGODB-CR'],
-            scram_credentials: user['credentials']['SCRAM-SHA-1'])
+            scram_credentials: user['credentials']['SCRAM-SHA-1'],
+            scram_256_credentials: user['credentials']['SCRAM-SHA-256'])
       end
     else
       Puppet.warning 'User info is available only from master host'
@@ -61,10 +61,19 @@ Puppet::Type.type(:mongodb_user).provide(:mongodb, parent: Puppet::Provider::Mon
         digestPassword: false
       }
 
-      if mongo_4?
-        # SCRAM-SHA-256 requires digestPassword to be true.
-        command[:mechanisms] = ['SCRAM-SHA-1']
+      if mongo_greater_than_or_equal_4?
+        # In mongo 4 and above, password hash is only supported for SCRAM-SHA-1 mechanism
+        # by default mechanisms = ['SCRAM-SHA-1', 'SCRAM-SHA-256']
+        if @resource[:password_hash] 
+          command[:mechanisms] = ['SCRAM-SHA-1']
+        else
+          # If there is a SCRAM-SHA-256 mechanism, the password must be plain text, 
+          # and digetstPassword must be true
+          command[:pwd] = @resource[:password]
+          command[:digestPassword] = true
+        end
       end
+      
 
       mongo_eval("db.runCommand(#{command.to_json})", @resource[:database])
     else
@@ -95,6 +104,12 @@ Puppet::Type.type(:mongodb_user).provide(:mongodb, parent: Puppet::Provider::Mon
         pwd: @resource[:password_hash],
         digestPassword: false
       }
+
+      if mongo_greater_than_or_equal_4?
+        # In mongo 4 and above, password hash is only supported for SCRAM-SHA-1 mechanism
+        # by default mechanisms = ['SCRAM-SHA-1', 'SCRAM-SHA-256']
+        command[:mechanisms] = ['SCRAM-SHA-1']
+      end
 
       mongo_eval("db.runCommand(#{command.to_json})", @resource[:database])
     else
